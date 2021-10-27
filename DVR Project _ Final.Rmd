@@ -1,0 +1,349 @@
+---
+title: "DVR"
+author: "Bilge Deniz Kocak"
+date: "10/22/2021"
+output: word_document
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+Aim: Trying to recreate the visualization in <https://data.world/makeovermonday/2020w11-self-reported-life-satisfaction-vs-gdp-per-capita> and then improving on it.
+
+```{r setup}
+library("mapproj")
+library("readxl")
+library("dplyr")
+library("ggplot2")
+library("ggmap")
+```
+
+```{r}
+data <- read.csv("gdp-vs-happiness.csv")
+colnames(data) <- c("Country", "Code", "Year", "gdpPerCap", "lifeSat", "pop")
+
+continent_data <- read_excel("Region LookUp.xlsx")
+continent_data
+```
+
+```{r}
+data_2017x <- data %>%
+  na.omit() %>%
+  filter(Year == 2017) %>%
+  inner_join(continent_data, by = "Country") %>%
+  select("Country", "gdpPerCap", "lifeSat", "pop", "Region")
+data_2017x
+```
+
+```{r}
+distinct_country <- data %>%
+  filter(Year == 2017) %>%
+  na.omit() %>%
+  select(Country) %>%
+  distinct(Country) 
+
+anti_join(distinct_country, continent_data, by = "Country") %>%
+  distinct(Country)
+```
+
+We lost 8 countries along the way... Although they had values for 2017, they were not included in continent_data.
+
+And Russia and Tanzania do appear in the original visualization, so we should include these too.
+I am not bothering with the regions since I will not use them anyway.
+
+```{r}
+continent_data <- continent_data %>%
+  rbind(c("Cote d'Ivoire", "Africa", NA),
+        c("Democratic Republic of Congo", "Africa", NA),
+        c("Iran", "Asia", NA),
+        c("Laos", "Asia", NA),
+        c("Moldova", "Europe", NA),
+        c("Palestine", "Asia", NA),
+        c("Russia", "Asia", NA),
+        c("Tanzania", "Africa", NA))
+```
+
+```{r}
+data_2017 <- data %>%
+  filter(Year == 2017) %>%
+  inner_join(continent_data, by = "Country") %>%
+  select("Country", "gdpPerCap", "lifeSat", "pop", "Region") %>%
+  na.omit() 
+data_2017
+```
+
+```{r}
+data_2017 %>%
+  select("Region") %>%
+  distinct(Region)
+```
+
+Alright, "Arab States" and "Middle East" could be in Asia or Africa, and we need to add Ocenia.
+
+```{r}
+data_2017 %>%
+  filter(Region == "Arab States")
+
+data_2017 %>%
+  filter(Region == "Middle east")
+
+data_2017 <- data_2017 %>% 
+  mutate(Region = replace(Region, Region == "Arab States", "Asia")) %>%
+  mutate(Region = replace(Region, Region == "Asia & Pacific", "Asia")) %>%
+  mutate(Region = replace(Region, Region == "Middle east", "Asia")) %>%
+  mutate(Region = replace(Region, Region == "South/Latin America", "South America")) %>%
+  mutate(Region = ifelse(Country %in% c("Australia", "New Zealand"), "Oceania", Region)) %>%
+  mutate(Region = replace(Region, Region == "Asia" & Country %in% c("Algeria", "Mauritania", "Morocco", "Tunisia", "Egypt", "Libya"), "Africa"))
+
+data_2017
+```
+
+Oceania is a thing in the visualization, but not in the dataset -- It was just under Asia & Pacific (now "Asia").
+
+Let's see what they showed as in Oceania: I see Australia and one more purple little dot close to it.
+I think it is safe to assume that it is New Zealand.
+
+```{r}
+data_2017 <- data_2017 %>%
+  mutate(Region = ifelse(Country %in% c("Australia", "New Zealand"), "Oceania", Region))
+data_2017
+```
+
+The original visualization definitely does not have all those labels.
+What did they add the text according to?
+
+```{r}
+countries_labeled <- c("Norway", "United States", "Qatar", "Kuwait", "Saudi Arabia", 
+                       "Australia", "Canada", "Israel", "France", "Italy", "Japan", 
+                       "Costa Rica", "Panama", "Chile", "Romania", "Kazakhstan", "Russia",
+                       "Malaysia", "Hong Kong", "Brazil", "Colombia", "Thailand",
+                       "Belarus", "China", "Venezuela", "Iran", "Uzbekistan", "Kosovo",
+                       "Jamaica", "Peru", "Philippines", "Bhutan", "Jordan", "South Africa", 
+                       "Sri Lanka", "Tunisia", "Egypt", "Botswana", "Pakistan", "Kyrgyzstan",
+                       "Tajikistan", "Nigeria", "Vietnam", "Laos", "India", "Angola", "Sudan",
+                       "Bangladesh", "Zambia", "Cambodia", "Cameroon", "Congo", "Mali",
+                       "Nepal", "Chad", "Ethiopia", "Uganda", "Haiti", "Zimbabwe", "Tanzania",
+                       "Yemen", "Malawi", "Burundi", "Liberia", "Niger", "Afghanistan")
+```
+
+```{r}
+data_2017 %>%
+  arrange(desc(pop)) %>%
+  ggplot(aes(x = gdpPerCap, y = lifeSat, color = Region, size = pop)) + 
+  geom_point(alpha = 0.8) +
+  geom_point(shape = 1, colour = "#5C5851") +
+  geom_text(data_2017 = data_2017, aes(x = gdpPerCap,
+                             y = lifeSat,
+                             label = ifelse(Country %in% countries_labeled,Country, "")),
+            size=2, vjust = -0.2, hjust = -0.2, color = "#000000") +
+  scale_size(range = c(.1, 10)) +
+  labs(y = "Life satisfaction (country average; 0-10)", x = "GDP per capita") + 
+  scale_color_manual(values = c("Africa" = "#5575C1",
+                                "Asia" = "#D14E5B",
+                                "Europe" = "#ED8D03",
+                                "North America" = "#4C824A",
+                                "Oceania" = "#A752BA",
+                                "South America" = "#6AC487")) +
+  guides(size=FALSE) + 
+  theme(panel.grid = element_line(color = "gray",size = 0.25,linetype = 2),
+        panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA),
+        legend.title = element_blank(), legend.text = element_text(size = 8),
+        legend.justification = "top", legend.key = element_rect(fill = "transparent"),
+        legend.key.size = unit(0.3, "cm"),
+        panel.grid.minor=element_blank(),
+        axis.title=element_text(size=8),
+        axis.text=element_text(color="#666666")) +
+  guides(color = guide_legend(override.aes = list(size = 2, shape = 15))) +
+  scale_y_continuous(breaks=c(2,3,4,5,6,7), limits = c(2,7.7)) +
+  scale_x_log10(breaks = c(500, 1000, 10000, 100000), labels = c("$500", "$1,000", "$10,000", "$100,000"), limits = c(500, NA))
+```
+
+Alright, where did Angola, Burundi, Yemen, etc. go?
+
+```{r}
+data %>%
+  filter(Year == 2017, Country %in% c("Angola","Burundi", "Yemen"))
+```
+
+Since they have NA GDP per capitas or life satisfactions, they got eliminated!
+But how come they are still in their visualization...
+
+Both Angola's and Burundi's life satisfaction seems to be around 3.8.
+I wonder why they used around 3.8 in the visualization.
+
+```{r}
+data %>%
+  filter(Country == "Angola") 
+```
+
+3.794838 for 2014?
+So maybe they are using the last known value that is not an NA?
+
+Let's check Burundi.
+
+```{r}
+data %>%
+  filter(Country == "Burundi") 
+```
+
+3.775283?
+That is probably the value we are seeing, but it is for 2018 -- so after 2017.
+So maybe they are picking the years closest to 2017?
+
+```{r}
+data %>%
+  filter(Year == 2017, is.na(gdpPerCap) | is.na(lifeSat) | is.na(pop)) 
+
+data %>%
+  filter(Year == 2017, !is.na(gdpPerCap) & !is.na(lifeSat) & !is.na(pop)) 
+
+data_2017
+```
+
+So, we have 142 countries(?) we are displaying since they have no missing values, and 145 countries we are not displaying since they have missing values!
+I can't believe we just lost half of the world with ignoring missing values, and maybe that is why they decided to go for closest values for those 145 countries.
+
+I am so curious to see how many countries are included in this visualization, so I am counting it right now... I counted 155.
+Yes, they don't have something like 142 + 145 = 289 (isn't there supposed to be 195 countries in total anyway, how did we get this number?).
+Based on what did they decide to ignore some countries?
+
+Wait a second, look at the first data frame.
+Since when is Africa, Arab World, World, OECD Members, Asia, Central Europe and the Baltics, etc. are countries?
+They are not.
+So, there are some extra ones there.
+If I take those out, would I magically have 13 countries that I could somehow include in my visualization based on available data on the year closest to 2017?
+
+If I compare what I see in that list with missing values with the 195 countries in the world, I see that (Using only the countries from <https://www.worldometers.info/geography/alphabetical-list-of-countries/>, with the note that Swaziland is Eswatini and is thus included.):
+
+"Andorra", "Angola", "Bahamas", "Belize", "Bhutan", "Brunei","Burundi", "Cuba", "Djibouti", "Dominica", "Eritrea", "Fiji","Grenada", "Guinea-Bissau", "Guyana", "Kiribati", "Liechtenstein", "Malaysia", "Marshall Islands", "Monaco","Nauru", "North Korea", "Oman", "Palau", "Papua New Guinea", "Qatar", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Seychelles", "Solomon Islands","Somalia", "South Sudan", "Sudan", "Suriname", "Swaziland", "Syria", "Timor", "Tonga", "Tuvalu", "Vanuatu", "Venezuela", "Yemen"
+
+are the countries that are official countries and have missing values for 2017, and could be predicted from the available data on the year closest to 2017.
+
+That is a lot more than 13.
+In fact, it is 46.
+
+So why did they decide to include those 13 countries specifically by predicting on other years' data, and not decide to do that for other years?
+I don't know.
+But I think it is misleading that in a plot that is supposed to show data for 2017, there is values that are not from 2017.
+
+```{r}
+world <- map_data("world")
+colnames(world) <- c("long", "lat", "group", "order", "Country", "subregion")
+world_joinedx <- world %>% left_join(data_2017, by = "Country") 
+world_joinedx 
+```
+
+Wait a second.
+I had the values for the USA in data, why is it not there anymore?
+
+```{r}
+world_joinedx %>%
+  filter(Country == "USA")
+data_2017 %>%
+  filter(Country == "United States")
+```
+
+I wonder if USA is the only country in this situation...
+
+```{r}
+anti_join(data_2017, world_joinedx, by = "Country") %>%
+  arrange(desc(Country))
+
+world_joinedx %>%
+  select(Country) %>%
+  distinct() %>%
+  arrange(desc(Country))
+```
+
+So, United States is USA.
+United Kingdom is UK.
+Trinidad and Tobago are seperated as two different countries.
+Macedonia is North Macedonia.
+Hong Kong is not included (a special administrative region of China, not independent).
+Democratic Republic of Congo is Democratic Republic of the Congo.
+Cote d'Ivoire is Ivory Coast.
+Congo is Republic of Congo.
+
+```{r}
+world_joined <- world %>% left_join(data_2017, by = "Country") %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "USA", 54225.45, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "USA", 6.991759, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "USA", 325084992, pop)) %>%
+  mutate(Region = ifelse(Country == "USA", "North America", Region)) %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "UK", 39753.24, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "UK", 7.103273, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "UK", 66727000, pop)) %>%
+  mutate(Region = ifelse(Country == "UK", "Europe", Region)) %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "Trinidad", 28763.07, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "Trinidad", 6.19186, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "Trinidad", 1384000, pop)) %>%
+  mutate(Region = ifelse(Country == "Trinidad", "South America", Region))%>%
+  
+  mutate(gdpPerCap = ifelse(Country == "Tobago", 28763.07, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "Tobago", 6.19186, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "Tobago", 1384000, pop)) %>%
+  mutate(Region = ifelse(Country == "Tobago", "South America", Region)) %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "North Macedonia", 13111.21, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "North Macedonia", 5.233867, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "North Macedonia", 2082000, pop)) %>%
+  mutate(Region = ifelse(Country == "North Macedonia", "Europe", Region)) %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "Democratic Republic of the Congo", 808.1332, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "Democratic Republic of the Congo", 4.311033, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "Democratic Republic of the Congo", 81399000, pop)) %>%
+  mutate(Region = ifelse(Country == "Democratic Republic of the Congo", "Africa", Region)) %>%
+
+  mutate(gdpPerCap = ifelse(Country == "Ivory Coast", 3601.006, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "Ivory Coast", 5.037735, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "Ivory Coast", 24437000, pop)) %>%
+  mutate(Region = ifelse(Country == "Ivory Coast", "Africa", Region)) %>%
+  
+  mutate(gdpPerCap = ifelse(Country == "Congo", 4881.406, gdpPerCap)) %>%
+  mutate(lifeSat = ifelse(Country == "Congo", 4.883991, lifeSat)) %>%
+  mutate(pop = ifelse(Country == "Congo", 5111000, pop)) %>%
+  mutate(Region = ifelse(Country == "Congo", "Africa", Region))
+    
+world_joined <- world_joined %>%
+  mutate(Country=replace(Country, Country=="USA", "United States")) %>%
+  mutate(Country=replace(Country, Country=="UK", "United Kingdom")) %>%
+  mutate(Country=replace(Country, Country=="Trinidad", "Trinidad and Tobago")) %>%
+  mutate(Country=replace(Country, Country=="Tobago", "Trinidad and Tobago")) %>%
+  mutate(Country=replace(Country, Country=="North Macedonia", "Macedonia")) %>%
+  mutate(Country=replace(Country, Country=="Democratic Republic of the Congo", "Democratic Republic of
+                         Congo"))%>%
+  mutate(Country=replace(Country, Country=="Cote d'Ivoire", "Ivory Coast")) %>%
+  mutate(Country=replace(Country, Country=="Congo", "Republic of Congo")) 
+
+world_joined %>%
+  filter(Country == "United States")
+```
+
+```{r}
+world_joined<-world_joined %>% 
+  select(long,lat,group,order,Country,gdpPerCap,lifeSat) %>% 
+  mutate(gdpPerCap=if_else(is.na(gdpPerCap), 9999999, gdpPerCap)) %>% 
+  mutate(gdpCat= cut(gdpPerCap, breaks=c(0, 3000, 30000, 2000000, 9999999), na.rm=F, labels=c('Low(<3000)','Medium(3001-30000)','High(>30000)','NA'), include.lowest=TRUE))
+ 
+ggplot(data = world_joined) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = lifeSat, color=gdpCat)) +
+  scale_fill_gradient2(low="red", mid= "light green", high= "blue", midpoint=5.25)+
+  scale_color_manual(values= c('Low(<3000)'="red", 'Medium(3001-30000)' = "Green", 'High(>30000)' = "blue", 'NA'="grey") ,breaks= waiver(), aesthetics = "color")+
+  labs(title= "Self-reported Life Satisfaction vs GDP per capita, 2017", color="GDP Per Capita", 
+       fill ="Life Satisfaction (0-10)") + 
+  theme(panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        legend.justification = c(0, 0), 
+        legend.position = c(0, 0),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8)) 
+  
+```
